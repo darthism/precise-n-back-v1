@@ -23,11 +23,14 @@ export const NBackGame = () => {
   const [visible, setVisible] = useState(false);
   const [score, setScore] = useState({ hits: 0, misses: 0, falseAlarms: 0 });
   const [trialCount, setTrialCount] = useState(0);
-  const [responses, setResponses] = useState({
-    spatial: false,
-    color: false,
-    audio: false,
-    shape: false,
+  
+  // Use Refs for values that need to be accessed in the timer without triggering effects
+  const responsesRef = useRef({ spatial: false, color: false, audio: false, shape: false });
+  const historyRef = useRef<Stimulus[]>([]);
+  
+  // State for UI rendering
+  const [uiResponses, setUiResponses] = useState({
+    spatial: false, color: false, audio: false, shape: false,
   });
 
   const [feedback, setFeedback] = useState<{
@@ -37,9 +40,7 @@ export const NBackGame = () => {
     shape: 'correct' | 'incorrect' | null;
   }>({ spatial: null, color: null, audio: null, shape: null });
 
-  const scoredTrialsRef = useRef<Set<number>>(new Set());
-
-  const checkMatch = useCallback((modality: keyof typeof responses, current: Stimulus, target: Stimulus) => {
+  const checkMatch = useCallback((modality: string, current: Stimulus, target: Stimulus) => {
     if (modality === 'spatial') return current.spatial.x === target.spatial.x && current.spatial.y === target.spatial.y;
     if (modality === 'color') return current.color === target.color;
     if (modality === 'audio') return current.audio === target.audio;
@@ -47,62 +48,79 @@ export const NBackGame = () => {
     return false;
   }, []);
 
-  const handleResponse = useCallback((modality: keyof typeof responses) => {
-    if (gameState !== 'playing' || responses[modality]) return;
+  const handleResponse = useCallback((modality: keyof typeof uiResponses) => {
+    if (gameState !== 'playing' || responsesRef.current[modality]) return;
 
-    setResponses(prev => ({ ...prev, [modality]: true }));
+    responsesRef.current[modality] = true;
+    setUiResponses(prev => ({ ...prev, [modality]: true }));
 
     // Immediate feedback check for False Alarms
-    if (history.length > n) {
-      const current = history[history.length - 1];
-      const target = history[history.length - n - 1];
+    const currentHistory = historyRef.current;
+    if (currentHistory.length > n) {
+      const current = currentHistory[currentHistory.length - 1];
+      const target = currentHistory[currentHistory.length - n - 1];
       const isMatch = checkMatch(modality, current, target);
 
       if (!isMatch) {
+        setScore(prev => ({ ...prev, falseAlarms: prev.falseAlarms + 1 }));
         setFeedback(prev => ({ ...prev, [modality]: 'incorrect' }));
       } else {
+        setScore(prev => ({ ...prev, hits: prev.hits + 1 }));
         setFeedback(prev => ({ ...prev, [modality]: 'correct' }));
       }
     }
-  }, [gameState, responses, history, n, checkMatch]);
+  }, [gameState, n, checkMatch]);
 
-  const nextTrial = useCallback(() => {
-    setTrialCount(prev => {
-      if (prev >= maxTrials) {
-        setGameState('finished');
-        return prev;
-      }
-      return prev + 1;
-    });
-  }, [maxTrials]);
-
-  // Game loop
+  // Main Game Loop Effect
   useEffect(() => {
     if (gameState !== 'playing') return;
 
-    if (trialCount > maxTrials) {
+    if (trialCount >= maxTrials) {
       setGameState('finished');
       return;
     }
 
-    // Generate next stimulus
-    setHistory(prev => {
-      const { stimulus } = generateNextStimulus(prev, n, similarityDelta);
-      return [...prev, stimulus];
-    });
+    // 1. Scoring misses from the PREVIOUS trial (the one that just ended)
+    const currentHistory = historyRef.current;
+    if (currentHistory.length > n) {
+      const lastTrialIdx = currentHistory.length - 1;
+      const targetIdx = lastTrialIdx - n;
+      const lastTrial = currentHistory[lastTrialIdx];
+      const target = currentHistory[targetIdx];
+      const lastResponses = responsesRef.current;
 
-    setResponses({ spatial: false, color: false, audio: false, shape: false });
+      const modalities: (keyof typeof uiResponses)[] = ['spatial', 'color', 'audio', 'shape'];
+      modalities.forEach(m => {
+        const isMatch = checkMatch(m, lastTrial, target);
+        if (isMatch && !lastResponses[m]) {
+          setScore(prev => ({ ...prev, misses: prev.misses + 1 }));
+        }
+      });
+    }
+
+    // 2. Start NEW trial
+    const { stimulus } = generateNextStimulus(currentHistory, n, similarityDelta);
+    const newHistory = [...currentHistory, stimulus];
+    historyRef.current = newHistory;
+    setHistory(newHistory);
+    
+    // Reset responses and feedback for the new trial
+    responsesRef.current = { spatial: false, color: false, audio: false, shape: false };
+    setUiResponses({ spatial: false, color: false, audio: false, shape: false });
     setFeedback({ spatial: null, color: null, audio: null, shape: null });
+    
     setVisible(true);
 
     const hideTimeout = setTimeout(() => setVisible(false), STIMULUS_DURATION);
-    const nextTimeout = setTimeout(nextTrial, TRIAL_DURATION);
+    const trialTimeout = setTimeout(() => {
+      setTrialCount(prev => prev + 1);
+    }, TRIAL_DURATION);
 
     return () => {
       clearTimeout(hideTimeout);
-      clearTimeout(nextTimeout);
+      clearTimeout(trialTimeout);
     };
-  }, [trialCount, gameState, n, similarityDelta, nextTrial, maxTrials]);
+  }, [trialCount, gameState, n, similarityDelta, maxTrials, checkMatch]);
 
   // Keyboard listeners
   useEffect(() => {
@@ -121,50 +139,15 @@ export const NBackGame = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [gameState, handleResponse]);
 
-  // Scoring logic - runs at end of trial or on response
-  useEffect(() => {
-    if (gameState !== 'playing' || history.length <= n) return;
-
-    const lastFinishedTrialIdx = history.length - 1;
-    if (scoredTrialsRef.current.has(lastFinishedTrialIdx)) return;
-
-    const targetIdx = lastFinishedTrialIdx - n;
-    if (targetIdx < 0) return;
-
-    const current = history[lastFinishedTrialIdx];
-    const target = history[targetIdx];
-
-    const modalities: (keyof typeof responses)[] = ['spatial', 'color', 'audio', 'shape'];
-    
-    modalities.forEach(m => {
-      const isMatch = checkMatch(m, current, target);
-      const didRespond = responses[m];
-
-      if (isMatch && didRespond) {
-        setScore(prev => ({ ...prev, hits: prev.hits + 1 }));
-      } else if (isMatch && !didRespond) {
-        setScore(prev => ({ ...prev, misses: prev.misses + 1 }));
-        // Turn red for Miss
-        setFeedback(prev => ({ ...prev, [m]: 'incorrect' }));
-      } else if (!isMatch && didRespond) {
-        setScore(prev => ({ ...prev, falseAlarms: prev.falseAlarms + 1 }));
-        // Already handled in handleResponse, but being safe
-        setFeedback(prev => ({ ...prev, [m]: 'incorrect' }));
-      }
-    });
-
-    scoredTrialsRef.current.add(lastFinishedTrialIdx);
-  }, [trialCount, responses, history, n, gameState, checkMatch]);
-
   const startGame = async () => {
     await Tone.start();
     setScore({ hits: 0, misses: 0, falseAlarms: 0 });
     setTrialCount(0);
-    scoredTrialsRef.current = new Set();
     const initialHistory: Stimulus[] = [];
     for (let i = 0; i < n; i++) {
       initialHistory.push(generateRandomStimulus());
     }
+    historyRef.current = initialHistory;
     setHistory(initialHistory);
     setGameState('playing');
   };
@@ -291,9 +274,9 @@ export const NBackGame = () => {
               { id: 'color', label: 'COLOR', key: 'D' },
               { id: 'shape', label: 'SHAPE', key: 'F' },
             ].map((m) => {
-              const modalityId = m.id as keyof typeof responses;
+              const modalityId = m.id as keyof typeof uiResponses;
               const status = feedback[modalityId];
-              const isPressed = responses[modalityId];
+              const isPressed = uiResponses[modalityId];
               
               let buttonVariant: "secondary" | "outline" | "default" = isPressed ? "secondary" : "outline";
               let extraClasses = "";
