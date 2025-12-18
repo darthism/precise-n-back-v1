@@ -3,6 +3,8 @@ export interface Vector2 {
   y: number;
 }
 
+export type Modality = 'spatial' | 'color' | 'audio' | 'shape';
+
 export interface Stimulus {
   spatial: Vector2;
   color: number; // Hue (0-360)
@@ -45,7 +47,8 @@ export function generateRandomStimulus(): Stimulus {
 export function generateNextStimulus(
   history: Stimulus[],
   currentN: number,
-  similarityDelta: number
+  deltas: Record<Modality, number>,
+  activeModalities: Modality[]
 ): { stimulus: Stimulus } {
   const target = history.length >= currentN ? history[history.length - currentN] : null;
   const random = generateRandomStimulus();
@@ -59,41 +62,49 @@ export function generateNextStimulus(
 
   if (target) {
     // Spatial
-    const rSpatial = Math.random();
-    if (rSpatial < P_TARGET) {
-      nextStimulus.spatial = { ...target.spatial };
-    } else if (rSpatial < P_TARGET + P_LURE) {
-      nextStimulus.spatial = {
-        x: jitter(target.spatial.x, 0.2, similarityDelta, 0.1, 0.9),
-        y: jitter(target.spatial.y, 0.2, similarityDelta, 0.1, 0.9),
-      };
+    if (activeModalities.includes('spatial')) {
+      const rSpatial = Math.random();
+      if (rSpatial < P_TARGET) {
+        nextStimulus.spatial = { ...target.spatial };
+      } else if (rSpatial < P_TARGET + P_LURE) {
+        nextStimulus.spatial = {
+          x: jitter(target.spatial.x, 0.2, deltas.spatial, 0.1, 0.9),
+          y: jitter(target.spatial.y, 0.2, deltas.spatial, 0.1, 0.9),
+        };
+      }
     }
 
     // Color
-    const rColor = Math.random();
-    if (rColor < P_TARGET) {
-      nextStimulus.color = target.color;
-    } else if (rColor < P_TARGET + P_LURE) {
-      nextStimulus.color = (target.color + (Math.random() - 0.5) * 2 * 30 * similarityDelta + 360) % 360;
+    if (activeModalities.includes('color')) {
+      const rColor = Math.random();
+      if (rColor < P_TARGET) {
+        nextStimulus.color = target.color;
+      } else if (rColor < P_TARGET + P_LURE) {
+        nextStimulus.color = (target.color + (Math.random() - 0.5) * 2 * 30 * deltas.color + 360) % 360;
+      }
     }
 
     // Audio
-    const rAudio = Math.random();
-    if (rAudio < P_TARGET) {
-      nextStimulus.audio = target.audio;
-    } else if (rAudio < P_TARGET + P_LURE) {
-      nextStimulus.audio = target.audio + (Math.random() - 0.5) * 2 * 50 * similarityDelta;
+    if (activeModalities.includes('audio')) {
+      const rAudio = Math.random();
+      if (rAudio < P_TARGET) {
+        nextStimulus.audio = target.audio;
+      } else if (rAudio < P_TARGET + P_LURE) {
+        nextStimulus.audio = target.audio + (Math.random() - 0.5) * 2 * 50 * deltas.audio;
+      }
     }
 
     // Shape
-    const rShape = Math.random();
-    if (rShape < P_TARGET) {
-      nextStimulus.shape = target.shape.map(v => ({ ...v }));
-    } else if (rShape < P_TARGET + P_LURE) {
-      nextStimulus.shape = target.shape.map(v => ({
-        x: jitter(v.x, 0.1, similarityDelta, 0.1, 0.9),
-        y: jitter(v.y, 0.1, similarityDelta, 0.1, 0.9),
-      }));
+    if (activeModalities.includes('shape')) {
+      const rShape = Math.random();
+      if (rShape < P_TARGET) {
+        nextStimulus.shape = target.shape.map(v => ({ ...v }));
+      } else if (rShape < P_TARGET + P_LURE) {
+        nextStimulus.shape = target.shape.map(v => ({
+          x: jitter(v.x, 0.1, deltas.shape, 0.1, 0.9),
+          y: jitter(v.y, 0.1, deltas.shape, 0.1, 0.9),
+        }));
+      }
     }
   }
 

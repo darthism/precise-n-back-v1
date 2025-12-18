@@ -1,14 +1,14 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Stimulus, generateNextStimulus, INITIAL_STIMULUS, generateRandomStimulus } from '@/lib/engine';
+import { Stimulus, generateNextStimulus, INITIAL_STIMULUS, generateRandomStimulus, Modality } from '@/lib/engine';
 import { StimulusDisplay } from './StimulusDisplay';
 import { AudioEngine } from './AudioEngine';
 import { Button } from './ui/button';
 import { Card } from './ui/card';
 import { Progress } from './ui/progress';
 import * as Tone from 'tone';
-import { Brain, Settings, Play, RotateCcw, BarChart3 } from 'lucide-react';
+import { Brain, Settings, Play, RotateCcw, BarChart3, CheckCircle2 } from 'lucide-react';
 
 const TRIAL_DURATION = 3000;
 const STIMULUS_DURATION = 1000;
@@ -16,7 +16,17 @@ const STIMULUS_DURATION = 1000;
 export const NBackGame = () => {
   const [n, setN] = useState(2);
   const [maxTrials, setMaxTrials] = useState(20);
-  const [similarityDelta, setSimilarityDelta] = useState(0.5);
+  
+  // Track deltas per modality
+  const [deltas, setDeltas] = useState<Record<Modality, number>>({
+    spatial: 0.5,
+    color: 0.5,
+    audio: 0.5,
+    shape: 0.5
+  });
+
+  // Track active modalities
+  const [activeModalities, setActiveModalities] = useState<Modality[]>(['spatial', 'audio', 'color', 'shape']);
   
   const [history, setHistory] = useState<Stimulus[]>([]);
   const [gameState, setGameState] = useState<'idle' | 'playing' | 'finished'>('idle');
@@ -24,21 +34,16 @@ export const NBackGame = () => {
   const [score, setScore] = useState({ hits: 0, misses: 0, falseAlarms: 0 });
   const [trialCount, setTrialCount] = useState(0);
   
-  // Use Refs for values that need to be accessed in the timer without triggering effects
-  const responsesRef = useRef({ spatial: false, color: false, audio: false, shape: false });
+  const responsesRef = useRef<Record<string, boolean>>({ spatial: false, color: false, audio: false, shape: false });
   const historyRef = useRef<Stimulus[]>([]);
   
-  // State for UI rendering
-  const [uiResponses, setUiResponses] = useState({
+  const [uiResponses, setUiResponses] = useState<Record<string, boolean>>({
     spatial: false, color: false, audio: false, shape: false,
   });
 
-  const [feedback, setFeedback] = useState<{
-    spatial: 'correct' | 'incorrect' | null;
-    color: 'correct' | 'incorrect' | null;
-    audio: 'correct' | 'incorrect' | null;
-    shape: 'correct' | 'incorrect' | null;
-  }>({ spatial: null, color: null, audio: null, shape: null });
+  const [feedback, setFeedback] = useState<Record<string, 'correct' | 'incorrect' | null>>({ 
+    spatial: null, color: null, audio: null, shape: null 
+  });
 
   const checkMatch = useCallback((modality: string, current: Stimulus, target: Stimulus) => {
     if (modality === 'spatial') return current.spatial.x === target.spatial.x && current.spatial.y === target.spatial.y;
@@ -48,13 +53,12 @@ export const NBackGame = () => {
     return false;
   }, []);
 
-  const handleResponse = useCallback((modality: keyof typeof uiResponses) => {
-    if (gameState !== 'playing' || responsesRef.current[modality]) return;
+  const handleResponse = useCallback((modality: Modality) => {
+    if (gameState !== 'playing' || responsesRef.current[modality] || !activeModalities.includes(modality)) return;
 
     responsesRef.current[modality] = true;
     setUiResponses(prev => ({ ...prev, [modality]: true }));
 
-    // Immediate feedback check for False Alarms
     const currentHistory = historyRef.current;
     if (currentHistory.length > n) {
       const current = currentHistory[currentHistory.length - 1];
@@ -69,9 +73,8 @@ export const NBackGame = () => {
         setFeedback(prev => ({ ...prev, [modality]: 'correct' }));
       }
     }
-  }, [gameState, n, checkMatch]);
+  }, [gameState, n, checkMatch, activeModalities]);
 
-  // Main Game Loop Effect
   useEffect(() => {
     if (gameState !== 'playing') return;
 
@@ -80,7 +83,6 @@ export const NBackGame = () => {
       return;
     }
 
-    // 1. Scoring misses from the PREVIOUS trial (the one that just ended)
     const currentHistory = historyRef.current;
     if (currentHistory.length > n) {
       const lastTrialIdx = currentHistory.length - 1;
@@ -89,8 +91,7 @@ export const NBackGame = () => {
       const target = currentHistory[targetIdx];
       const lastResponses = responsesRef.current;
 
-      const modalities: (keyof typeof uiResponses)[] = ['spatial', 'color', 'audio', 'shape'];
-      modalities.forEach(m => {
+      activeModalities.forEach(m => {
         const isMatch = checkMatch(m, lastTrial, target);
         if (isMatch && !lastResponses[m]) {
           setScore(prev => ({ ...prev, misses: prev.misses + 1 }));
@@ -98,13 +99,11 @@ export const NBackGame = () => {
       });
     }
 
-    // 2. Start NEW trial
-    const { stimulus } = generateNextStimulus(currentHistory, n, similarityDelta);
+    const { stimulus } = generateNextStimulus(currentHistory, n, deltas, activeModalities);
     const newHistory = [...currentHistory, stimulus];
     historyRef.current = newHistory;
     setHistory(newHistory);
     
-    // Reset responses and feedback for the new trial
     responsesRef.current = { spatial: false, color: false, audio: false, shape: false };
     setUiResponses({ spatial: false, color: false, audio: false, shape: false });
     setFeedback({ spatial: null, color: null, audio: null, shape: null });
@@ -120,9 +119,8 @@ export const NBackGame = () => {
       clearTimeout(hideTimeout);
       clearTimeout(trialTimeout);
     };
-  }, [trialCount, gameState, n, similarityDelta, maxTrials, checkMatch]);
+  }, [trialCount, gameState, n, deltas, activeModalities, maxTrials, checkMatch]);
 
-  // Keyboard listeners
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (gameState !== 'playing') return;
@@ -139,7 +137,21 @@ export const NBackGame = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [gameState, handleResponse]);
 
+  const toggleModality = (modality: Modality) => {
+    if (gameState === 'playing') return;
+    setActiveModalities(prev => 
+      prev.includes(modality) 
+        ? prev.filter(m => m !== modality)
+        : [...prev, modality]
+    );
+  };
+
+  const updateDelta = (modality: Modality, value: number) => {
+    setDeltas(prev => ({ ...prev, [modality]: value }));
+  };
+
   const startGame = async () => {
+    if (activeModalities.length === 0) return;
     await Tone.start();
     setScore({ hits: 0, misses: 0, falseAlarms: 0 });
     setTrialCount(0);
@@ -171,7 +183,7 @@ export const NBackGame = () => {
             CONFIGURATION
           </div>
 
-          <div className="space-y-4">
+          <div className="space-y-6">
             <div className="space-y-2">
               <div className="flex justify-between">
                 <label className="text-xs text-gray-500 uppercase tracking-wider">N-Back Level</label>
@@ -188,20 +200,6 @@ export const NBackGame = () => {
 
             <div className="space-y-2">
               <div className="flex justify-between">
-                <label className="text-xs text-gray-500 uppercase tracking-wider">Similarity Δ</label>
-                <span className="text-xs font-mono text-blue-400">{similarityDelta.toFixed(2)}</span>
-              </div>
-              <input 
-                type="range" min="0.1" max="1.0" step="0.1"
-                disabled={gameState === 'playing'}
-                value={similarityDelta} 
-                onChange={e => setSimilarityDelta(parseFloat(e.target.value))}
-                className="w-full h-1.5 bg-gray-800 rounded-lg appearance-none cursor-pointer accent-blue-500"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <div className="flex justify-between">
                 <label className="text-xs text-gray-500 uppercase tracking-wider">Trial Count</label>
                 <span className="text-xs font-mono text-blue-400">{maxTrials}</span>
               </div>
@@ -212,6 +210,38 @@ export const NBackGame = () => {
                 onChange={e => setMaxTrials(parseInt(e.target.value))}
                 className="w-full h-1.5 bg-gray-800 rounded-lg appearance-none cursor-pointer accent-blue-500"
               />
+            </div>
+
+            <div className="pt-4 border-t border-gray-800 space-y-4">
+              <label className="text-xs text-gray-500 uppercase tracking-wider block">Modalities & Precision</label>
+              {(['spatial', 'audio', 'color', 'shape'] as Modality[]).map(m => (
+                <div key={m} className="space-y-3 p-3 rounded-lg bg-gray-900/30 border border-gray-800/50">
+                  <div className="flex items-center justify-between">
+                    <button 
+                      onClick={() => toggleModality(m)}
+                      disabled={gameState === 'playing'}
+                      className={`flex items-center gap-2 text-sm font-bold transition-colors ${
+                        activeModalities.includes(m) ? 'text-blue-400' : 'text-gray-600'
+                      }`}
+                    >
+                      <CheckCircle2 className={`w-4 h-4 ${activeModalities.includes(m) ? 'opacity-100' : 'opacity-20'}`} />
+                      {m.toUpperCase()}
+                    </button>
+                    {activeModalities.includes(m) && (
+                      <span className="text-[10px] font-mono text-gray-500">Δ {deltas[m].toFixed(2)}</span>
+                    )}
+                  </div>
+                  {activeModalities.includes(m) && (
+                    <input 
+                      type="range" min="0.1" max="1.0" step="0.1"
+                      disabled={gameState === 'playing'}
+                      value={deltas[m]} 
+                      onChange={e => updateDelta(m, parseFloat(e.target.value))}
+                      className="w-full h-1 bg-gray-800 rounded-lg appearance-none cursor-pointer accent-blue-500"
+                    />
+                  )}
+                </div>
+              ))}
             </div>
           </div>
         </div>
@@ -255,11 +285,15 @@ export const NBackGame = () => {
             <div className="space-y-2">
               <h2 className="text-2xl font-bold tracking-tight">Ready for integration?</h2>
               <p className="text-gray-400 text-sm leading-relaxed">
-                You are about to process four high-precision data streams. 
-                Spatial, Color, Audio, and Shape. Focus on the {n}-back delta.
+                You are about to process {activeModalities.length} high-precision data streams. 
+                {activeModalities.map(m => m.charAt(0).toUpperCase() + m.slice(1)).join(', ')}. Focus on the {n}-back delta.
               </p>
             </div>
-            <Button onClick={startGame} className="w-full py-8 text-xl font-bold rounded-xl bg-blue-600 hover:bg-blue-500 transition-all hover:scale-[1.02] active:scale-[0.98] group">
+            <Button 
+              onClick={startGame} 
+              disabled={activeModalities.length === 0}
+              className="w-full py-8 text-xl font-bold rounded-xl bg-blue-600 hover:bg-blue-500 transition-all hover:scale-[1.02] active:scale-[0.98] group disabled:opacity-50 disabled:cursor-not-allowed"
+            >
               <Play className="w-6 h-6 mr-2 fill-current" />
               INITIATE SESSION
             </Button>
@@ -267,31 +301,31 @@ export const NBackGame = () => {
         )}
 
         {gameState === 'playing' && (
-          <div className="grid grid-cols-2 gap-3 w-full max-w-[min(90vw,500px)]">
+          <div className={`grid gap-3 w-full max-w-[min(90vw,500px)] ${
+            activeModalities.length === 1 ? 'grid-cols-1' : 'grid-cols-2'
+          }`}>
             {[
               { id: 'spatial', label: 'SPATIAL', key: 'A' },
               { id: 'audio', label: 'AUDIO', key: 'S' },
               { id: 'color', label: 'COLOR', key: 'D' },
               { id: 'shape', label: 'SHAPE', key: 'F' },
-            ].map((m) => {
-              const modalityId = m.id as keyof typeof uiResponses;
+            ].filter(m => activeModalities.includes(m.id as Modality)).map((m) => {
+              const modalityId = m.id as Modality;
               const status = feedback[modalityId];
               const isPressed = uiResponses[modalityId];
               
-              let buttonVariant: "secondary" | "outline" | "default" = isPressed ? "secondary" : "outline";
               let extraClasses = "";
-              
               if (status === 'incorrect') {
                 extraClasses = "border-red-500 shadow-[0_0_20px_rgba(239,68,68,0.5)] text-red-400 bg-red-500/10";
               } else if (isPressed) {
-                extraClasses = "border-blue-500 shadow-[0_0_20px_rgba(59,130,246,0.5)]";
+                extraClasses = "border-blue-500 shadow-[0_0_20px_rgba(59,130,246,0.5)] bg-blue-500/10";
               }
 
               return (
                 <Button 
                   key={m.id}
                   onClick={() => handleResponse(modalityId)}
-                  variant={buttonVariant}
+                  variant="outline"
                   className={`h-16 lg:h-24 text-base lg:text-lg font-bold border-2 transition-all relative overflow-hidden active:scale-95 ${extraClasses}`}
                 >
                   <div className="flex flex-col items-center">
