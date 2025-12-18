@@ -290,7 +290,14 @@ export const NBackGame = () => {
 
       {/* Main Content */}
       <main className="flex-1 flex flex-col items-center justify-center p-4 lg:p-8 gap-6 lg:gap-8 overflow-hidden">
-        <div className="w-full max-w-[min(90vw,500px,70vh)] aspect-square relative shadow-2xl shadow-blue-500/10">
+        <div 
+          className="w-full max-w-[500px] aspect-square relative shadow-2xl shadow-blue-500/10"
+          style={{ 
+            maxWidth: 'min(90vw, 500px, 70vh)',
+            minWidth: '200px',
+            minHeight: '200px'
+          }}
+        >
           <StimulusDisplay 
             spatial={currentStimulus?.spatial || INITIAL_STIMULUS.spatial}
             color={currentStimulus?.color || INITIAL_STIMULUS.color}
