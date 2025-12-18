@@ -22,6 +22,11 @@ export const INITIAL_STIMULUS: Stimulus = {
   ],
 };
 
+const jitter = (val: number, range: number, delta: number, min: number = 0, max: number = 1) => {
+  const shift = (Math.random() - 0.5) * 2 * range * delta;
+  return Math.max(min, Math.min(max, val + shift));
+};
+
 export function generateRandomStimulus(): Stimulus {
   return {
     spatial: { 
@@ -37,56 +42,60 @@ export function generateRandomStimulus(): Stimulus {
   };
 }
 
-export function applyDelta(stimulus: Stimulus, delta: number): Stimulus {
-  // delta is 0.0 (identical) to 1.0 (completely different)
-  // Target: delta = 0.1 (nearly identical)
-  
-  const jitter = (val: number, range: number, min: number = 0, max: number = 1) => {
-    const shift = (Math.random() - 0.5) * 2 * range * delta;
-    return Math.max(min, Math.min(max, val + shift));
-  };
-
-  return {
-    spatial: {
-      x: jitter(stimulus.spatial.x, 0.2, 0.1, 0.9),
-      y: jitter(stimulus.spatial.y, 0.2, 0.1, 0.9),
-    },
-    color: (stimulus.color + (Math.random() - 0.5) * 2 * 30 * delta + 360) % 360,
-    audio: stimulus.audio + (Math.random() - 0.5) * 2 * 50 * delta,
-    shape: stimulus.shape.map(v => ({
-      x: jitter(v.x, 0.1, 0.1, 0.9),
-      y: jitter(v.y, 0.1, 0.1, 0.9),
-    })),
-  };
-}
-
 export function generateNextStimulus(
   history: Stimulus[],
   currentN: number,
   similarityDelta: number
-): { stimulus: Stimulus; isTarget: boolean; isLure: boolean } {
-  const isTarget = Math.random() < 0.25; // 25% chance of N-match
-  const isLure = !isTarget && Math.random() < 0.20; // 20% chance of lure
+): { stimulus: Stimulus } {
+  const target = history.length >= currentN ? history[history.length - currentN] : null;
+  const random = generateRandomStimulus();
 
-  if (isTarget && history.length >= currentN) {
-    return {
-      stimulus: history[history.length - currentN],
-      isTarget: true,
-      isLure: false,
-    };
-  } else if (isLure && history.length >= currentN) {
-    // Create a stimulus that is ALMOST the target
-    const target = history[history.length - currentN];
-    return {
-      stimulus: applyDelta(target, similarityDelta),
-      isTarget: false,
-      isLure: true,
-    };
-  } else {
-    return {
-      stimulus: generateRandomStimulus(),
-      isTarget: false,
-      isLure: false,
-    };
+  // Probability of target match per modality
+  const P_TARGET = 0.25;
+  // Probability of lure per modality
+  const P_LURE = 0.20;
+
+  const nextStimulus: Stimulus = { ...random };
+
+  if (target) {
+    // Spatial
+    const rSpatial = Math.random();
+    if (rSpatial < P_TARGET) {
+      nextStimulus.spatial = { ...target.spatial };
+    } else if (rSpatial < P_TARGET + P_LURE) {
+      nextStimulus.spatial = {
+        x: jitter(target.spatial.x, 0.2, similarityDelta, 0.1, 0.9),
+        y: jitter(target.spatial.y, 0.2, similarityDelta, 0.1, 0.9),
+      };
+    }
+
+    // Color
+    const rColor = Math.random();
+    if (rColor < P_TARGET) {
+      nextStimulus.color = target.color;
+    } else if (rColor < P_TARGET + P_LURE) {
+      nextStimulus.color = (target.color + (Math.random() - 0.5) * 2 * 30 * similarityDelta + 360) % 360;
+    }
+
+    // Audio
+    const rAudio = Math.random();
+    if (rAudio < P_TARGET) {
+      nextStimulus.audio = target.audio;
+    } else if (rAudio < P_TARGET + P_LURE) {
+      nextStimulus.audio = target.audio + (Math.random() - 0.5) * 2 * 50 * similarityDelta;
+    }
+
+    // Shape
+    const rShape = Math.random();
+    if (rShape < P_TARGET) {
+      nextStimulus.shape = target.shape.map(v => ({ ...v }));
+    } else if (rShape < P_TARGET + P_LURE) {
+      nextStimulus.shape = target.shape.map(v => ({
+        x: jitter(v.x, 0.1, similarityDelta, 0.1, 0.9),
+        y: jitter(v.y, 0.1, similarityDelta, 0.1, 0.9),
+      }));
+    }
   }
+
+  return { stimulus: nextStimulus };
 }
