@@ -8,7 +8,7 @@ import { Button } from './ui/button';
 import { Card } from './ui/card';
 import { Progress } from './ui/progress';
 import * as Tone from 'tone';
-import { Brain, Settings, Play, RotateCcw, BarChart3, CheckCircle2 } from 'lucide-react';
+import { Brain, Settings, Play, RotateCcw, BarChart3, CheckCircle2, Square } from 'lucide-react';
 
 const TRIAL_DURATION = 3000;
 const STIMULUS_DURATION = 1000;
@@ -321,40 +321,50 @@ export const NBackGame = () => {
         )}
 
         {gameState === 'playing' && (
-          <div className={`grid gap-3 w-full max-w-[min(90vw,500px)] ${
-            activeModalities.length === 1 ? 'grid-cols-1' : 'grid-cols-2'
-          }`}>
-            {[
-              { id: 'spatial', label: 'SPATIAL', key: 'A' },
-              { id: 'audio', label: 'AUDIO', key: 'S' },
-              { id: 'color', label: 'COLOR', key: 'D' },
-              { id: 'shape', label: 'SHAPE', key: 'F' },
-            ].filter(m => activeModalities.includes(m.id as Modality)).map((m) => {
-              const modalityId = m.id as Modality;
-              const status = feedback[modalityId];
-              const isPressed = uiResponses[modalityId];
-              
-              let extraClasses = "";
-              if (status === 'incorrect') {
-                extraClasses = "border-red-500 shadow-[0_0_20px_rgba(239,68,68,0.5)] text-red-400 bg-red-500/10";
-              } else if (isPressed) {
-                extraClasses = "border-blue-500 shadow-[0_0_20px_rgba(59,130,246,0.5)] bg-blue-500/10";
-              }
+          <div className="flex flex-col gap-4 w-full max-w-[min(90vw,500px)]">
+            <div className={`grid gap-3 ${
+              activeModalities.length === 1 ? 'grid-cols-1' : 'grid-cols-2'
+            }`}>
+              {[
+                { id: 'spatial', label: 'SPATIAL', key: 'A' },
+                { id: 'audio', label: 'AUDIO', key: 'S' },
+                { id: 'color', label: 'COLOR', key: 'D' },
+                { id: 'shape', label: 'SHAPE', key: 'F' },
+              ].filter(m => activeModalities.includes(m.id as Modality)).map((m) => {
+                const modalityId = m.id as Modality;
+                const status = feedback[modalityId];
+                const isPressed = uiResponses[modalityId];
+                
+                let extraClasses = "";
+                if (status === 'incorrect') {
+                  extraClasses = "border-red-500 shadow-[0_0_20px_rgba(239,68,68,0.5)] text-red-400 bg-red-500/10";
+                } else if (isPressed) {
+                  extraClasses = "border-blue-500 shadow-[0_0_20px_rgba(59,130,246,0.5)] bg-blue-500/10";
+                }
 
-              return (
-                <Button 
-                  key={m.id}
-                  onClick={() => handleResponse(modalityId)}
-                  variant="outline"
-                  className={`h-16 lg:h-24 text-base lg:text-lg font-bold border-2 transition-all relative overflow-hidden active:scale-95 ${extraClasses}`}
-                >
-                  <div className="flex flex-col items-center">
-                    <span>{m.label}</span>
-                    <span className="text-[10px] opacity-40 font-mono mt-1 hidden lg:block">PRESS {m.key}</span>
-                  </div>
-                </Button>
-              );
-            })}
+                return (
+                  <Button 
+                    key={m.id}
+                    onClick={() => handleResponse(modalityId)}
+                    variant="outline"
+                    className={`h-16 lg:h-24 text-base lg:text-lg font-bold border-2 transition-all relative overflow-hidden active:scale-95 ${extraClasses}`}
+                  >
+                    <div className="flex flex-col items-center">
+                      <span>{m.label}</span>
+                      <span className="text-[10px] opacity-40 font-mono mt-1 hidden lg:block">PRESS {m.key}</span>
+                    </div>
+                  </Button>
+                );
+              })}
+            </div>
+            <Button 
+              onClick={() => setGameState('finished')}
+              variant="outline"
+              className="h-10 text-sm font-medium border border-gray-700 text-gray-400 hover:text-red-400 hover:border-red-500/50 hover:bg-red-500/10 transition-all"
+            >
+              <Square className="w-3 h-3 mr-2 fill-current" />
+              STOP SESSION
+            </Button>
           </div>
         )}
 
