@@ -12,22 +12,42 @@ import { Brain, Settings, Play, RotateCcw, BarChart3, CheckCircle2 } from 'lucid
 
 const TRIAL_DURATION = 3000;
 const STIMULUS_DURATION = 1000;
+const STORAGE_KEY = 'neural-microscope-settings';
 
 export const NBackGame = () => {
+  // 1. Initial State from Local Storage
+  const [isLoaded, setIsLoaded] = useState(false);
   const [n, setN] = useState(2);
   const [maxTrials, setMaxTrials] = useState(20);
-  
-  // Track deltas per modality
   const [deltas, setDeltas] = useState<Record<Modality, number>>({
-    spatial: 0.5,
-    color: 0.5,
-    audio: 0.5,
-    shape: 0.5
+    spatial: 0.5, color: 0.5, audio: 0.5, shape: 0.5
   });
-
-  // Track active modalities
   const [activeModalities, setActiveModalities] = useState<Modality[]>(['spatial', 'audio', 'color', 'shape']);
-  
+
+  // Load settings on mount
+  useEffect(() => {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (parsed.n) setN(parsed.n);
+        if (parsed.maxTrials) setMaxTrials(parsed.maxTrials);
+        if (parsed.deltas) setDeltas(parsed.deltas);
+        if (parsed.activeModalities) setActiveModalities(parsed.activeModalities);
+      } catch (e) {
+        console.error("Failed to parse saved settings", e);
+      }
+    }
+    setIsLoaded(true);
+  }, []);
+
+  // Save settings on change
+  useEffect(() => {
+    if (!isLoaded) return;
+    const settings = { n, maxTrials, deltas, activeModalities };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+  }, [n, maxTrials, deltas, activeModalities, isLoaded]);
+
   const [history, setHistory] = useState<Stimulus[]>([]);
   const [gameState, setGameState] = useState<'idle' | 'playing' | 'finished'>('idle');
   const [visible, setVisible] = useState(false);
