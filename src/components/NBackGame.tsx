@@ -30,14 +30,41 @@ export const NBackGame = () => {
     shape: false,
   });
 
+  const [feedback, setFeedback] = useState<{
+    spatial: 'correct' | 'incorrect' | null;
+    color: 'correct' | 'incorrect' | null;
+    audio: 'correct' | 'incorrect' | null;
+    shape: 'correct' | 'incorrect' | null;
+  }>({ spatial: null, color: null, audio: null, shape: null });
+
   const scoredTrialsRef = useRef<Set<number>>(new Set());
 
-  const handleResponse = useCallback((modality: keyof typeof responses) => {
-    setResponses(prev => {
-      if (prev[modality]) return prev;
-      return { ...prev, [modality]: true };
-    });
+  const checkMatch = useCallback((modality: keyof typeof responses, current: Stimulus, target: Stimulus) => {
+    if (modality === 'spatial') return current.spatial.x === target.spatial.x && current.spatial.y === target.spatial.y;
+    if (modality === 'color') return current.color === target.color;
+    if (modality === 'audio') return current.audio === target.audio;
+    if (modality === 'shape') return JSON.stringify(current.shape) === JSON.stringify(target.shape);
+    return false;
   }, []);
+
+  const handleResponse = useCallback((modality: keyof typeof responses) => {
+    if (gameState !== 'playing' || responses[modality]) return;
+
+    setResponses(prev => ({ ...prev, [modality]: true }));
+
+    // Immediate feedback check for False Alarms
+    if (history.length > n) {
+      const current = history[history.length - 1];
+      const target = history[history.length - n - 1];
+      const isMatch = checkMatch(modality, current, target);
+
+      if (!isMatch) {
+        setFeedback(prev => ({ ...prev, [modality]: 'incorrect' }));
+      } else {
+        setFeedback(prev => ({ ...prev, [modality]: 'correct' }));
+      }
+    }
+  }, [gameState, responses, history, n, checkMatch]);
 
   const nextTrial = useCallback(() => {
     setTrialCount(prev => {
@@ -65,6 +92,7 @@ export const NBackGame = () => {
     });
 
     setResponses({ spatial: false, color: false, audio: false, shape: false });
+    setFeedback({ spatial: null, color: null, audio: null, shape: null });
     setVisible(true);
 
     const hideTimeout = setTimeout(() => setVisible(false), STIMULUS_DURATION);
@@ -93,7 +121,7 @@ export const NBackGame = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [gameState, handleResponse]);
 
-  // Scoring logic
+  // Scoring logic - runs at end of trial or on response
   useEffect(() => {
     if (gameState !== 'playing' || history.length <= n) return;
 
@@ -109,25 +137,24 @@ export const NBackGame = () => {
     const modalities: (keyof typeof responses)[] = ['spatial', 'color', 'audio', 'shape'];
     
     modalities.forEach(m => {
-      let isMatch = false;
-      if (m === 'spatial') isMatch = current.spatial.x === target.spatial.x && current.spatial.y === target.spatial.y;
-      if (m === 'color') isMatch = current.color === target.color;
-      if (m === 'audio') isMatch = current.audio === target.audio;
-      if (m === 'shape') isMatch = JSON.stringify(current.shape) === JSON.stringify(target.shape);
-
+      const isMatch = checkMatch(m, current, target);
       const didRespond = responses[m];
 
       if (isMatch && didRespond) {
         setScore(prev => ({ ...prev, hits: prev.hits + 1 }));
       } else if (isMatch && !didRespond) {
         setScore(prev => ({ ...prev, misses: prev.misses + 1 }));
+        // Turn red for Miss
+        setFeedback(prev => ({ ...prev, [m]: 'incorrect' }));
       } else if (!isMatch && didRespond) {
         setScore(prev => ({ ...prev, falseAlarms: prev.falseAlarms + 1 }));
+        // Already handled in handleResponse, but being safe
+        setFeedback(prev => ({ ...prev, [m]: 'incorrect' }));
       }
     });
 
     scoredTrialsRef.current.add(lastFinishedTrialIdx);
-  }, [trialCount, responses, history, n, gameState]);
+  }, [trialCount, responses, history, n, gameState, checkMatch]);
 
   const startGame = async () => {
     await Tone.start();
@@ -263,21 +290,34 @@ export const NBackGame = () => {
               { id: 'audio', label: 'AUDIO', key: 'S' },
               { id: 'color', label: 'COLOR', key: 'D' },
               { id: 'shape', label: 'SHAPE', key: 'F' },
-            ].map((m) => (
-              <Button 
-                key={m.id}
-                onClick={() => handleResponse(m.id as keyof typeof responses)}
-                variant={responses[m.id as keyof typeof responses] ? "secondary" : "outline"}
-                className={`h-16 lg:h-24 text-base lg:text-lg font-bold border-2 transition-all relative overflow-hidden active:scale-95 ${
-                  responses[m.id as keyof typeof responses] ? 'border-blue-500 shadow-[0_0_20px_rgba(59,130,246,0.5)]' : 'border-gray-800'
-                }`}
-              >
-                <div className="flex flex-col items-center">
-                  <span>{m.label}</span>
-                  <span className="text-[10px] opacity-40 font-mono mt-1 hidden lg:block">PRESS {m.key}</span>
-                </div>
-              </Button>
-            ))}
+            ].map((m) => {
+              const modalityId = m.id as keyof typeof responses;
+              const status = feedback[modalityId];
+              const isPressed = responses[modalityId];
+              
+              let buttonVariant: "secondary" | "outline" | "default" = isPressed ? "secondary" : "outline";
+              let extraClasses = "";
+              
+              if (status === 'incorrect') {
+                extraClasses = "border-red-500 shadow-[0_0_20px_rgba(239,68,68,0.5)] text-red-400 bg-red-500/10";
+              } else if (isPressed) {
+                extraClasses = "border-blue-500 shadow-[0_0_20px_rgba(59,130,246,0.5)]";
+              }
+
+              return (
+                <Button 
+                  key={m.id}
+                  onClick={() => handleResponse(modalityId)}
+                  variant={buttonVariant}
+                  className={`h-16 lg:h-24 text-base lg:text-lg font-bold border-2 transition-all relative overflow-hidden active:scale-95 ${extraClasses}`}
+                >
+                  <div className="flex flex-col items-center">
+                    <span>{m.label}</span>
+                    <span className="text-[10px] opacity-40 font-mono mt-1 hidden lg:block">PRESS {m.key}</span>
+                  </div>
+                </Button>
+              );
+            })}
           </div>
         )}
 
